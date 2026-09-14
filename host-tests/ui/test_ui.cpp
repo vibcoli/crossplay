@@ -20,6 +20,7 @@
 #include "../../src/apps_local/chess/ChessScreens.h"
 #include "../../src/apps_local/connectfour/ConnectFourScreens.h"
 #include "../../src/apps_local/connections/ConnectionsScreens.h"
+#include "../../src/apps_local/dav/DavScreens.h"
 #include "../../src/apps_local/dungeon/DungeonScreens.h"
 #include "../../src/apps_local/forehead/ForeheadScreens.h"
 #include "../../src/apps_local/go/GoScreens.h"
@@ -12874,6 +12875,250 @@ void testWikipediaInstallSaysTheAddressFirst() {
   CHECK(retry != nullptr && tapRun(failed, retry).action == wikiui::ActionRetry);
 }
 
+// --- DAV: the agenda, the reminders and the contacts ----------------------
+//
+// One builder serves all three lists, so every assertion below is about the
+// shared frame rather than about one tab. What is NOT here, and cannot be: how
+// it looks. This app's three arrangements were never rendered, because the
+// checkout it was written in could not build a simulator (the network policy
+// blocks PlatformIO's registry), and docs/building-apps.md is explicit that
+// the winner of three is chosen from renders and nothing else. These tests
+// hold the structure; the look is still owed a bake-off.
+
+void buildDavList(Rendered& out, const davui::ListModel& model) {
+  const fui::DeviceContext ctx = device();
+  const fui::InputSnapshot noInput{};
+  toybox::Frame frame(out.target, ctx, noInput, out.interactions);
+  toybox::Screen screen(frame, toybox::themeTokens());
+  davui::buildList(screen, model);
+}
+
+void buildDavDetail(Rendered& out, const davui::DetailModel& model) {
+  const fui::DeviceContext ctx = device();
+  const fui::InputSnapshot noInput{};
+  toybox::Frame frame(out.target, ctx, noInput, out.interactions);
+  toybox::Screen screen(frame, toybox::themeTokens());
+  davui::buildDetail(screen, model);
+}
+
+void buildDavSetup(Rendered& out, const davui::SetupModel& model) {
+  const fui::DeviceContext ctx = device();
+  const fui::InputSnapshot noInput{};
+  toybox::Frame frame(out.target, ctx, noInput, out.interactions);
+  toybox::Screen screen(frame, toybox::themeTokens());
+  davui::buildSetup(screen, model);
+}
+
+// The three segments are the map between the lists, so the one you are in has
+// to be inert and the other two live. A segment that acts on the tab you are
+// already in is a control that does nothing, which reads as a broken app.
+void testDavSegmentsAreAMapNotTabs() {
+  davui::ListModel model;
+  model.tab = davui::Tab::Reminders;
+  {
+    Rendered out;
+    buildDavList(out, model);
+    CHECK(out.target.drew("AGENDA"));
+    CHECK(out.target.drew("TO DO"));
+    CHECK(out.target.drew("PEOPLE"));
+    // The band names the app; the segments name the list. If the title
+    // repeated the open tab, find() below would return the title's run and
+    // every tap assertion would be about a word with no action behind it --
+    // which is exactly how the first version of this test passed a mutant
+    // that made every segment live.
+    CHECK(out.target.drew("CALENDAR"));
+    const FakeTarget::TextRun* segment = out.target.find("TO DO");
+    CHECK(segment != nullptr);
+    if (segment != nullptr) CHECK(segment->rect.y > toybox::kBodyTop);
+  }
+
+  // ONE TAP PER RENDER. Three taps on one Rendered do not answer this
+  // question: the first tap is routed and the later ones are not, so a
+  // sequential check on the third segment passes whatever its action is. The
+  // first version of this test did exactly that and a mutant making every
+  // segment live walked straight through it.
+  const auto tapSegment = [&model](const char* label) {
+    Rendered out;
+    buildDavList(out, model);
+    const FakeTarget::TextRun* run = out.target.find(label);
+    CHECK(run != nullptr);
+    if (run == nullptr) return fui::ActionEvent{};
+    return tapRun(out, run);
+  };
+  CHECK(tapSegment("AGENDA").action == davui::ActionShowAgenda);
+  CHECK(tapSegment("PEOPLE").action == davui::ActionShowContacts);
+  // The one you are standing in, on a render of its own.
+  CHECK(tapSegment("TO DO").action == fui::NO_ACTION);
+}
+
+// Every row carries its own index, or opening the third entry opens the first.
+void testDavRowsCarryTheirIndex() {
+  static const char* kTitles[] = {"Zahnarzt", "Standup", "Mittagessen"};
+  fui::ListItem items[3] = {};
+  for (int i = 0; i < 3; ++i) {
+    items[i].label = kTitles[i];
+    items[i].subtitle = "09:00";
+    items[i].actionValue = static_cast<int16_t>(i);
+  }
+  davui::ListModel model;
+  model.items = items;
+  model.count = 3;
+
+  Rendered out;
+  buildDavList(out, model);
+  for (int i = 0; i < 3; ++i) {
+    const FakeTarget::TextRun* row = out.target.find(kTitles[i]);
+    CHECK(row != nullptr);
+    if (row == nullptr) continue;
+    const fui::ActionEvent event = tapRun(out, row);
+    CHECK(event.action == davui::ActionOpenEntry);
+    CHECK(event.value == i);
+  }
+}
+
+// A day band is a section heading on the first row of the day, not a column of
+// times beside a column of titles. Asserted because the whole no-tables shape
+// of this app rests on it.
+void testDavDayBandIsASectionHeadingNotAColumn() {
+  fui::ListItem items[2] = {};
+  items[0].label = "Zahnarzt";
+  items[0].subtitle = "09:00";
+  items[0].sectionHeading = "Today";
+  items[0].actionValue = 0;
+  items[1].label = "Standup";
+  items[1].subtitle = "08:00";
+  items[1].sectionHeading = "Tomorrow";
+  items[1].actionValue = 1;
+
+  davui::ListModel model;
+  model.items = items;
+  model.count = 2;
+  Rendered out;
+  buildDavList(out, model);
+
+  CHECK(out.target.drew("Today"));
+  CHECK(out.target.drew("Tomorrow"));
+  const FakeTarget::TextRun* heading = out.target.find("Today");
+  const FakeTarget::TextRun* row = out.target.find("Zahnarzt");
+  CHECK(heading != nullptr && row != nullptr);
+  if (heading == nullptr || row == nullptr) return;
+  // Above its row, not beside it: a heading sharing the row's line would be
+  // the two-column layout this app does not have.
+  CHECK(heading->rect.y < row->rect.y);
+}
+
+// An empty list says something. A blank panel reads as a fault, and an account
+// that has never synced is the ordinary first state of this app.
+void testDavEmptyListSaysSomething() {
+  davui::ListModel model;
+  model.emptyHeadline = "NOTHING SYNCED YET";
+  model.emptyMessage = "Tap SYNC to fetch your calendar.";
+  Rendered out;
+  buildDavList(out, model);
+  CHECK(out.target.drew("NOTHING SYNCED YET"));
+  CHECK(out.target.drew("Tap SYNC to fetch your calendar."));
+
+  // And the two lines do not land on each other. centeredText consumes
+  // nothing, which is how a headline comes to be painted over its own message.
+  const FakeTarget::TextRun* head = out.target.find("NOTHING SYNCED YET");
+  const FakeTarget::TextRun* message = out.target.find("Tap SYNC to fetch your calendar.");
+  CHECK(head != nullptr && message != nullptr);
+  if (head == nullptr || message == nullptr) return;
+  CHECK(head->rect.bottom() <= message->rect.y);
+}
+
+// SYNC is the only control that reaches for the radio, and it is on the band.
+void testDavSyncIsOnTheBandAndIsTheOnlyRadioControl() {
+  davui::ListModel model;
+  model.syncLabel = "SYNCED 5 MIN AGO";
+  Rendered out;
+  buildDavList(out, model);
+
+  const FakeTarget::TextRun* sync = out.target.find("SYNC");
+  CHECK(sync != nullptr);
+  if (sync == nullptr) return;
+  CHECK(tapRun(out, sync).action == davui::ActionSync);
+  // On the band, which is the top of the panel.
+  CHECK(sync->rect.y < toybox::kBodyTop);
+  CHECK(out.target.drew("SYNCED 5 MIN AGO"));
+}
+
+// The detail screen is lines of text, one fact per line. A null fact draws
+// nothing rather than a labelled blank, which would claim the server sent
+// something it did not.
+void testDavDetailDrawsOnlyTheFactsItHas() {
+  davui::DetailModel model;
+  model.title = "Zahnarzt";
+  model.when = "Today 09:00 - 09:45";
+  model.collection = "Privat";
+  Rendered out;
+  buildDavDetail(out, model);
+
+  CHECK(out.target.drew("Zahnarzt"));
+  CHECK(out.target.drew("Today 09:00 - 09:45"));
+  CHECK(out.target.drew("Privat"));
+
+  const FakeTarget::TextRun* when = out.target.find("Today 09:00 - 09:45");
+  const FakeTarget::TextRun* where = out.target.find("Privat");
+  CHECK(when != nullptr && where != nullptr);
+  if (when == nullptr || where == nullptr) return;
+  // Stacked, never side by side.
+  CHECK(when->rect.bottom() <= where->rect.y);
+}
+
+// A body that fits on one screen gets no pager. A control that does nothing is
+// worse than no control.
+void testDavDetailPagesOnlyWhenThereIsMore() {
+  davui::DetailModel model;
+  model.title = "Notiz";
+  {
+    Rendered out;
+    buildDavDetail(out, model);
+    CHECK(!out.target.drew("<"));
+    CHECK(!out.target.drew(">"));
+  }
+  {
+    model.pageLabel = "1 / 3";
+    Rendered out;
+    buildDavDetail(out, model);
+    CHECK(out.target.drew("1 / 3"));
+    const FakeTarget::TextRun* next = out.target.find(">");
+    CHECK(next != nullptr);
+    if (next != nullptr) CHECK(tapRun(out, next).action == davui::ActionPageNext);
+  }
+}
+
+// A password is never echoed, in any form. The row says whether one is stored,
+// which is the only thing a reader can act on; dots of the right length leak
+// the length.
+void testDavSetupNeverEchoesThePassword() {
+  davui::SetupModel model;
+  model.server = "caldav.icloud.com";
+  model.username = "someone@example.org";
+  model.hasPassword = true;
+  Rendered out;
+  buildDavSetup(out, model);
+
+  CHECK(out.target.drew("caldav.icloud.com"));
+  CHECK(out.target.drew("someone@example.org"));
+  CHECK(out.target.drew("stored"));
+  // Nothing that could be a password, echoed or masked.
+  CHECK(!out.target.drew("****"));
+  CHECK(!out.target.drew("......"));
+}
+
+// A sync that failed says why, on the screen holding the fields that would fix
+// it. A failure shown on a screen the reader has already left is unread.
+void testDavSetupShowsTheProblemWithTheFields() {
+  davui::SetupModel model;
+  model.server = "caldav.icloud.com";
+  model.problem = "The server refused the login.";
+  Rendered out;
+  buildDavSetup(out, model);
+  CHECK(out.target.drew("The server refused the login."));
+  CHECK(out.target.drew("caldav.icloud.com"));
+}
+
 int main() {
   testWallpapersGridHasTwoColumns();
   testWallpapersCellsStayOnScreen();
@@ -12905,6 +13150,15 @@ int main() {
   testTriviaOptionsCarryTheirIndex();
   testTriviaAlwaysOffersAWayOut();
   testTriviaDrawsNoOptionsWithoutAQuestion();
+  testDavSegmentsAreAMapNotTabs();
+  testDavRowsCarryTheirIndex();
+  testDavDayBandIsASectionHeadingNotAColumn();
+  testDavEmptyListSaysSomething();
+  testDavSyncIsOnTheBandAndIsTheOnlyRadioControl();
+  testDavDetailDrawsOnlyTheFactsItHas();
+  testDavDetailPagesOnlyWhenThereIsMore();
+  testDavSetupNeverEchoesThePassword();
+  testDavSetupShowsTheProblemWithTheFields();
   testWikipediaSearchRowsCarryTheirIndex();
   testWikipediaArticleChromeLeavesThePageItsRoom();
   testWikipediaContentsRowsCarryTheHeading();

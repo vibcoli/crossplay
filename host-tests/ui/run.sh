@@ -40,6 +40,7 @@ mkdir -p "$BUILD_DIR"
   ../../src/apps_local/go/GoScreens.cpp \
   ../../src/apps_local/go/GoCore.cpp \
   ../../src/apps_local/connectfour/ConnectFourScreens.cpp \
+  ../../src/apps_local/dav/DavScreens.cpp \
   ../../src/apps_local/connections/ConnectionsCore.cpp \
   ../../src/apps_local/connections/ConnectionsScreens.cpp \
   ../../src/apps_local/dungeon/DungeonCore.cpp \
