@@ -169,6 +169,71 @@ HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std:
   LOG_ERR("HTTP", "too many redirects");
   return HttpDownloader::HTTP_ERROR;
 }
+
+// PROPFIND/REPORT, streamed the same way as runGetWolf. Redirects are hopped
+// here rather than inside SecureHttpClient so the body is re-sent on each hop:
+// iCloud answers the well-known path with a 301 onto the user's own shard, and
+// a redirect that dropped the REPORT body would arrive as an empty query.
+HttpDownloader::DownloadError runDavWolf(const HttpDownloader::DavRequest& request, Sink& sink) {
+  WifiPowerSaveGuard psGuard;
+  std::string url = request.url;
+
+  for (int hop = 0; hop <= MAX_REDIRECTS; ++hop) {
+    freeink::SecureHttpClient http;
+    http.setTimeout(HTTP_TIMEOUT_MS);
+    http.setInsecure();
+    if (!http.begin(url)) {
+      LOG_ERR("DAV", "bad URL: %s", url.c_str());
+      return HttpDownloader::HTTP_ERROR;
+    }
+    http.setUserAgent("CrossPlay-ESP32-" CROSSPOINT_VERSION);
+    if (!request.username.empty()) {
+      const std::string credentials = request.username + ":" + request.password;
+      const String encoded = base64::encode(credentials.c_str());
+      http.addHeader("Authorization", std::string("Basic ") + encoded.c_str());
+    }
+    if (request.depth) http.addHeader("Depth", request.depth);
+    if (!request.body.empty()) http.addHeader("Content-Type", "application/xml; charset=utf-8");
+
+    LOG_DBG("DAV", "%s: %s", request.method, url.c_str());
+    unsigned long lastPumpMs = 0;
+    const int status = http.sendRequest(
+        request.method, reinterpret_cast<const uint8_t*>(request.body.data()), request.body.size(),
+        [&http, &sink](const uint8_t* data, size_t len) {
+          // Only the final response carries the multistatus; an auth challenge
+          // or an error page would otherwise be fed to the XML parser.
+          const int code = http.getStatus();
+          if (code != 200 && code != 207) return true;
+          if (!sink.write(data, len)) return false;
+          sink.downloaded += len;
+          return true;
+        },
+        [&sink, &lastPumpMs]() { return abortPoll(sink, lastPumpMs); });
+
+    g_lastStatus = status < 0 ? 0 : status;
+    if (http.aborted()) return HttpDownloader::ABORTED;
+    if (status < 0) {
+      LOG_ERR("DAV", "%s failed: %s", request.method, url.c_str());
+      return HttpDownloader::HTTP_ERROR;
+    }
+    if (isRedirect(status)) {
+      const std::string location = http.getHeader("location");
+      if (location.empty() || !freeink::SecureHttpClient::resolveUrl(url, location, url)) {
+        LOG_ERR("DAV", "bad redirect: %d", status);
+        return HttpDownloader::HTTP_ERROR;
+      }
+      continue;
+    }
+    if (status != 200 && status != 207) {
+      LOG_ERR("DAV", "unexpected status: %d", status);
+      return HttpDownloader::HTTP_ERROR;
+    }
+    if (http.callbackAborted()) return HttpDownloader::FILE_ERROR;
+    return HttpDownloader::OK;
+  }
+  LOG_ERR("DAV", "too many redirects");
+  return HttpDownloader::HTTP_ERROR;
+}
 #endif
 
 #if !defined(FREEINK_NET_WOLFSSL)
@@ -345,6 +410,28 @@ bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData
   Sink sink;
   sink.write = onData;
   return runGetSecure(url, username, password, sink) == OK;
+}
+
+HttpDownloader::DownloadError HttpDownloader::davRequest(const DavRequest& request, const DataCallback& onData) {
+  // Same guard as runGetSecure: entering the TLS stack with the radio down
+  // panics rather than failing, and every DAV call passes through here.
+  g_lastStatus = 0;
+  if (WiFi.status() != WL_CONNECTED) {
+    LOG_ERR("DAV", "no WiFi connection; refusing %s %s", request.method, request.url.c_str());
+    return HTTP_ERROR;
+  }
+  Sink sink;
+  sink.write = onData;
+#if defined(FREEINK_NET_WOLFSSL)
+  return runDavWolf(request, sink);
+#else
+  // esp_http_client's method enum has no REPORT, so this fork's DAV paths are
+  // wolfSSL-only. Every shipping env sets FREEINK_NET_WOLFSSL (platformio.ini),
+  // so this arm exists to keep the other transport compiling.
+  (void)sink;
+  LOG_ERR("DAV", "%s needs the wolfSSL transport", request.method);
+  return HTTP_ERROR;
+#endif
 }
 
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,

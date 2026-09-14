@@ -52,6 +52,26 @@ class HttpDownloader {
                        const std::string& password = "");
 
   /**
+   * One WebDAV request: a method the HTTP verbs do not cover (PROPFIND,
+   * REPORT), an XML body, and the Depth header those methods are defined in
+   * terms of. The response streams through onData like fetchUrl's callback
+   * form, so a multistatus is parsed as it arrives rather than held whole.
+   *
+   * 207 Multi-Status counts as success here — it is the normal answer to both
+   * methods, and treating only 200 as success would fail every DAV call.
+   */
+  struct DavRequest {
+    std::string url;
+    const char* method = "PROPFIND";
+    std::string body;         // XML; empty sends no body
+    const char* depth = "0";  // nullptr omits the header
+    std::string username;
+    std::string password;
+  };
+
+  static DownloadError davRequest(const DavRequest& request, const DataCallback& onData);
+
+  /**
    * Download a file to the SD card with optional credentials.
    *
    * downgradeRedirectsToHttp rewrites followed redirect targets from https to
