@@ -165,6 +165,25 @@ void sortReminders(std::vector<Entry>& entries);
 // value puts every lowercase surname after every uppercase one.
 void sortByTitle(std::vector<Entry>& entries);
 
+// Drops repeats of the same occurrence, keeping the first one seen.
+//
+// One appointment reaches the device twice whenever it sits in two collections
+// the account subscribes to -- a shared family calendar, or a work calendar
+// also delegated to you. Both copies carry the same UID, so the sync would
+// otherwise draw the same row twice with only the collection name differing.
+//
+// The key is (UID, start), not UID alone: an expanded recurrence DELIBERATELY
+// repeats one UID with a different start for every occurrence, and collapsing
+// on UID would leave a weekly standup showing once a year.
+//
+// An entry with an empty UID is never merged away. A server that omits UID
+// leaves nothing to compare, and falling back to the title would merge two
+// genuinely different appointments that happen to share a name and a minute.
+//
+// Order is preserved, so the collection synced first is the one whose copy
+// survives and the agenda's sort is not disturbed.
+void dedupeOccurrences(std::vector<Entry>& entries);
+
 // Civil date and time, both UTC. The device has no tz database; see the file
 // header for why that is the bargain rather than a gap.
 struct Civil {

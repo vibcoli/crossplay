@@ -587,6 +587,39 @@ void sortByTitle(std::vector<Entry>& entries) {
   });
 }
 
+void dedupeOccurrences(std::vector<Entry>& entries) {
+  if (entries.size() < 2) return;
+
+  // Sorted index rather than a hash set: the device has no business allocating
+  // one std::string key per entry, and this stays O(n log n) with the strings
+  // it already holds. The original position rides along so the survivor of a
+  // pair is the one that arrived first.
+  std::vector<size_t> order(entries.size());
+  for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+  std::sort(order.begin(), order.end(), [&entries](const size_t a, const size_t b) {
+    if (entries[a].uid != entries[b].uid) return entries[a].uid < entries[b].uid;
+    if (entries[a].start != entries[b].start) return entries[a].start < entries[b].start;
+    return a < b;
+  });
+
+  std::vector<bool> drop(entries.size(), false);
+  for (size_t i = 1; i < order.size(); ++i) {
+    const Entry& prev = entries[order[i - 1]];
+    const Entry& here = entries[order[i]];
+    // An empty UID is not an identity, so it never merges anything.
+    if (here.uid.empty()) continue;
+    if (here.uid == prev.uid && here.start == prev.start) drop[order[i]] = true;
+  }
+
+  size_t write = 0;
+  for (size_t read = 0; read < entries.size(); ++read) {
+    if (drop[read]) continue;
+    if (write != read) entries[write] = std::move(entries[read]);
+    ++write;
+  }
+  entries.resize(write);
+}
+
 Civil civilFromEpoch(uint32_t epoch) {
   Civil c;
   const uint32_t days = epoch / SECONDS_PER_DAY;

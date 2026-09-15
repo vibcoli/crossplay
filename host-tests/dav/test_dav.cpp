@@ -529,6 +529,82 @@ static void testFirstLineNeverElides() {
   expectTrue(got.find("...") == std::string::npos, "and carries no ellipsis");
 }
 
+// ---------------------------------------------------------------------------
+// Duplicates across collections
+// ---------------------------------------------------------------------------
+static dav::Entry makeEntry(const char* uid, uint32_t start, const char* collection) {
+  dav::Entry e;
+  e.uid = uid;
+  e.start = start;
+  e.title = "Termin";
+  e.collection = collection;
+  return e;
+}
+
+static void testDedupeAcrossCollections() {
+  // The case this exists for: one appointment sitting in two collections the
+  // account subscribes to. Same UID, same start, two collection names.
+  std::vector<dav::Entry> list = {makeEntry("shared-1", kNow, "Familie"), makeEntry("shared-1", kNow, "Privat")};
+  dav::dedupeOccurrences(list);
+  if (list.size() != 1) {
+    bad("one appointment in two collections should give one row, got " + std::to_string(list.size()));
+    return;
+  }
+  ok();
+  expectEq(list[0].collection, "Familie", "the copy that arrived first is the one kept");
+}
+
+static void testDedupeKeepsEveryOccurrenceOfARecurrence() {
+  // An expanded recurrence repeats ONE uid with a different start per
+  // occurrence. Collapsing on uid alone would leave a weekly standup showing
+  // once. This is the assertion that stops the fix above eating the feature
+  // the app is built on.
+  std::vector<dav::Entry> list = {makeEntry("weekly", kNow, "Arbeit"), makeEntry("weekly", kNow + 7 * 86400, "Arbeit"),
+                                  makeEntry("weekly", kNow + 14 * 86400, "Arbeit")};
+  dav::dedupeOccurrences(list);
+  expectTrue(list.size() == 3, "three occurrences of one recurring event all survive");
+}
+
+static void testDedupeNeverMergesOnAnEmptyUid() {
+  // A server that omits UID leaves nothing to compare. Falling back to the
+  // title would merge two genuinely different appointments that share a name
+  // and a minute -- two dentists in one family, on one calendar.
+  std::vector<dav::Entry> list = {makeEntry("", kNow, "A"), makeEntry("", kNow, "B")};
+  dav::dedupeOccurrences(list);
+  expectTrue(list.size() == 2, "entries with no UID are never merged away");
+}
+
+static void testDedupeKeepsDifferentEventsAtTheSameInstant() {
+  std::vector<dav::Entry> list = {makeEntry("a", kNow, "K"), makeEntry("b", kNow, "K")};
+  dav::dedupeOccurrences(list);
+  expectTrue(list.size() == 2, "two different events starting together both survive");
+}
+
+static void testDedupePreservesOrder() {
+  // The agenda is sorted before this runs, so reordering here would undo it.
+  std::vector<dav::Entry> list = {makeEntry("a", kNow, "K"), makeEntry("dup", kNow + 60, "Erste"),
+                                  makeEntry("b", kNow + 120, "K"), makeEntry("dup", kNow + 60, "Zweite")};
+  dav::dedupeOccurrences(list);
+  if (list.size() != 3) {
+    bad("one duplicate should have gone, got " + std::to_string(list.size()) + " rows");
+    return;
+  }
+  ok();
+  expectEq(list[0].uid, "a", "first stays first");
+  expectEq(list[1].uid, "dup", "the survivor keeps its original position");
+  expectEq(list[1].collection, "Erste", "and it is the first copy, not the last");
+  expectEq(list[2].uid, "b", "the rest keep their order");
+}
+
+static void testDedupeHandlesTheTrivialSizes() {
+  std::vector<dav::Entry> empty;
+  dav::dedupeOccurrences(empty);
+  expectTrue(empty.empty(), "an empty list is left alone");
+  std::vector<dav::Entry> one = {makeEntry("a", kNow, "K")};
+  dav::dedupeOccurrences(one);
+  expectTrue(one.size() == 1, "a single entry is left alone");
+}
+
 int main() {
   testUnfolding();
   testUnescaping();
@@ -558,6 +634,12 @@ int main() {
   testSortByStart();
   testSortReminders();
   testSortByTitle();
+  testDedupeAcrossCollections();
+  testDedupeKeepsEveryOccurrenceOfARecurrence();
+  testDedupeNeverMergesOnAnEmptyUid();
+  testDedupeKeepsDifferentEventsAtTheSameInstant();
+  testDedupePreservesOrder();
+  testDedupeHandlesTheTrivialSizes();
   testFirstLineNeverElides();
 
   std::printf("  %d checks, %d failed\n", checks, failed);

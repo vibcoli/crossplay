@@ -28,7 +28,13 @@ SRC=../../src/apps_local/dav
 #   2. THE FRAME BEFORE THE BLOCK. A sync blocks the loop inside HttpDownloader
 #      for as long as the server takes, so requestUpdate(true) has to publish
 #      the busy frame BEFORE the first request.
-#   3. THE WINDOW IS ASKED FOR. The agenda REPORT must carry reportEventsQuery's
+#   3. DEDUPE IS ACTUALLY CALLED. dedupeOccurrences() exists and is tested, but
+#      a function nobody calls is the repo's own documented failure mode ("a
+#      repair placed where it cannot run"). The sync has to run it ONCE over
+#      the merged list, after every collection has been parsed -- per
+#      collection it would find nothing, because the duplicate lives in the
+#      OTHER collection.
+#   4. THE WINDOW IS ASKED FOR. The agenda REPORT must carry reportEventsQuery's
 #      bounds rather than a bare component query: without <expand> a recurring
 #      event arrives once, as its master instance, and shows up on one day a
 #      year instead of every week.
