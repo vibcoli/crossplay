@@ -13,6 +13,7 @@
 #include "../../SilentRestart.h"
 #include "../../activities/network/WifiSelectionActivity.h"
 #include "../../network/HttpDownloader.h"
+#include "../../util/AppDataRoot.h"
 #include "../Shelf.h"
 #include "../ui/Toybox.h"
 #include "../ui/ToyboxTheme.h"
@@ -22,15 +23,35 @@ namespace fui = freeink::ui;
 
 namespace {
 
-constexpr const char* kDir = "/xkcd";
-constexpr const char* kIndexPath = "/xkcd/index.dat";
-constexpr const char* kImagePath = "/xkcd/images.dat";
-constexpr const char* kTextPath = "/xkcd/text.dat";
-constexpr const char* kReadPath = "/xkcd/read.bin";
+// Resolved through appdata so a user can keep this folder out of the
+// book list by renaming it with a leading dot; see util/AppDataRoot.h.
+const char* kDir() { return appdata::root("/xkcd"); }
+const char* kIndexPath() {
+  static const std::string path = appdata::path("/xkcd", "index.dat");
+  return path.c_str();
+}
+const char* kImagePath() {
+  static const std::string path = appdata::path("/xkcd", "images.dat");
+  return path.c_str();
+}
+const char* kTextPath() {
+  static const std::string path = appdata::path("/xkcd", "text.dat");
+  return path.c_str();
+}
+const char* kReadPath() {
+  static const std::string path = appdata::path("/xkcd", "read.bin");
+  return path.c_str();
+}
 
 // Scratch for the update, deleted on the way out.
-constexpr const char* kTmpPng = "/xkcd/.tmp.png";
-constexpr const char* kTmpBmp = "/xkcd/.tmp.bmp";
+const char* kTmpPng() {
+  static const std::string path = appdata::path("/xkcd", ".tmp.png");
+  return path.c_str();
+}
+const char* kTmpBmp() {
+  static const std::string path = appdata::path("/xkcd", ".tmp.bmp");
+  return path.c_str();
+}
 
 // The comic is blitted a band at a time through a stack buffer rather than
 // assembled whole: the tallest comic in the archive is 6370 rows, which at
@@ -133,8 +154,8 @@ void XkcdActivity::onExit() {
     delay(30);
     silentRestart();
   }
-  Storage.remove(kTmpPng);
-  Storage.remove(kTmpBmp);
+  Storage.remove(kTmpPng());
+  Storage.remove(kTmpBmp());
   Activity::onExit();
 }
 
@@ -149,10 +170,10 @@ bool XkcdActivity::openArchive() {
     return false;
   }
 
-  if (!Storage.openFileForRead("XKCD", kIndexPath, *indexFile_) ||
-      !Storage.openFileForRead("XKCD", kImagePath, *imageFile_) ||
-      !Storage.openFileForRead("XKCD", kTextPath, *textFile_)) {
-    LOG_INF("XKCD", "no pack on the card at %s", kDir);
+  if (!Storage.openFileForRead("XKCD", kIndexPath(), *indexFile_) ||
+      !Storage.openFileForRead("XKCD", kImagePath(), *imageFile_) ||
+      !Storage.openFileForRead("XKCD", kTextPath(), *textFile_)) {
+    LOG_INF("XKCD", "no pack on the card at %s", kDir());
     return false;
   }
 
@@ -165,7 +186,7 @@ bool XkcdActivity::openArchive() {
   }
 
   if (!archive_.open(*indexSrc_)) {
-    LOG_ERR("XKCD", "%s is not a pack this build can read", kIndexPath);
+    LOG_ERR("XKCD", "%s is not a pack this build can read", kIndexPath());
     return false;
   }
   LOG_INF("XKCD", "pack open: %d comics, newest #%u", archive_.count(), archive_.maxNum());
@@ -251,7 +272,7 @@ void XkcdActivity::markRead(const uint16_t num) {
 
 void XkcdActivity::loadReadState() {
   HalFile f;
-  if (!Storage.openFileForRead("XKCD", kReadPath, f)) return;
+  if (!Storage.openFileForRead("XKCD", kReadPath(), f)) return;
   f.read(readBits_, sizeof(readBits_));
   readCount_ = 0;
   for (int i = 0; i < kReadBitsBytes; ++i) {
@@ -268,8 +289,8 @@ void XkcdActivity::saveReadState() {
   // reader has done nothing at all.
   if (!readDirty_) return;
   HalFile f;
-  if (!Storage.openFileForWrite("XKCD", kReadPath, f)) {
-    LOG_ERR("XKCD", "could not write %s", kReadPath);
+  if (!Storage.openFileForWrite("XKCD", kReadPath(), f)) {
+    LOG_ERR("XKCD", "could not write %s", kReadPath());
     return;
   }
   f.write(readBits_, sizeof(readBits_));
@@ -789,7 +810,7 @@ void XkcdActivity::runPackDownload() {
   // exists() first: SdFat's mkdir refuses a directory that is already there
   // (it opens the entry O_CREAT | O_EXCL), so a bare mkdir worked once and
   // then told every retry that the card was not writable (card #475).
-  if (!Storage.exists(kDir) && !Storage.mkdir(kDir)) {
+  if (!Storage.exists(kDir()) && !Storage.mkdir(kDir())) {
     showNotice("NO ROOM", "Could not create /xkcd on the card. Is the card in, and writable?");
     return;
   }
@@ -800,7 +821,7 @@ void XkcdActivity::runPackDownload() {
     char url[128];
     char dest[48];
     snprintf(url, sizeof(url), "%s%s", kPackBase, part.file);
-    snprintf(dest, sizeof(dest), "%s/%s.part", kDir, part.file);
+    snprintf(dest, sizeof(dest), "%s/%s.part", kDir(), part.file);
 
     size_t lastPainted = 0;
     const auto progress = [this, &part, &lastPainted, &homeAfterCancel](const size_t got, const size_t total) {
@@ -832,7 +853,7 @@ void XkcdActivity::runPackDownload() {
     if (err != HttpDownloader::OK) {
       for (const Part& p : kParts) {
         char tmp[48];
-        snprintf(tmp, sizeof(tmp), "%s/%s.part", kDir, p.file);
+        snprintf(tmp, sizeof(tmp), "%s/%s.part", kDir(), p.file);
         Storage.remove(tmp);
       }
       if (err == HttpDownloader::ABORTED) {
@@ -850,8 +871,8 @@ void XkcdActivity::runPackDownload() {
   for (const Part& part : kParts) {
     char tmp[48];
     char fin[48];
-    snprintf(tmp, sizeof(tmp), "%s/%s.part", kDir, part.file);
-    snprintf(fin, sizeof(fin), "%s/%s", kDir, part.file);
+    snprintf(tmp, sizeof(tmp), "%s/%s.part", kDir(), part.file);
+    snprintf(fin, sizeof(fin), "%s/%s", kDir(), part.file);
     Storage.remove(fin);  // a half pack from some earlier era must not block the rename
     if (!Storage.rename(tmp, fin)) {
       showNotice("CARD TROUBLE", "Downloaded, but the card refused the final rename. Try again.");
@@ -995,7 +1016,7 @@ bool XkcdActivity::fetchOne(const uint16_t num, char* whyNot, const int whyNotCa
       updateHomeCancel_ = true;
     }
   };
-  if (HttpDownloader::downloadToFile(img, kTmpPng, pump, &updateCancel_) != HttpDownloader::OK) {
+  if (HttpDownloader::downloadToFile(img, kTmpPng(), pump, &updateCancel_) != HttpDownloader::OK) {
     snprintf(whyNot, whyNotCap, "Could not download the artwork for #%u.", static_cast<unsigned>(num));
     return false;
   }
@@ -1014,7 +1035,7 @@ bool XkcdActivity::fetchOne(const uint16_t num, char* whyNot, const int whyNotCa
   {
     HalFile png;
     HalFile bmp;
-    if (!Storage.openFileForRead("XKCD", kTmpPng, png) || !Storage.openFileForWrite("XKCD", kTmpBmp, bmp)) {
+    if (!Storage.openFileForRead("XKCD", kTmpPng(), png) || !Storage.openFileForWrite("XKCD", kTmpBmp(), bmp)) {
       snprintf(whyNot, whyNotCap, "No room on the card for #%u.", static_cast<unsigned>(num));
       return false;
     }
@@ -1030,7 +1051,7 @@ bool XkcdActivity::fetchOne(const uint16_t num, char* whyNot, const int whyNotCa
   // BMP's rows are padded to four bytes where ours are padded to one, and a
   // set bit there means *white* where ours means ink.
   HalFile bmp;
-  if (!Storage.openFileForRead("XKCD", kTmpBmp, bmp)) {
+  if (!Storage.openFileForRead("XKCD", kTmpBmp(), bmp)) {
     snprintf(whyNot, whyNotCap, "Lost the converted artwork for #%u.", static_cast<unsigned>(num));
     return false;
   }
@@ -1059,7 +1080,7 @@ bool XkcdActivity::fetchOne(const uint16_t num, char* whyNot, const int whyNotCa
   HalFile images;
   HalFile texts;
   HalFile index;
-  if (!Storage.openFileForRead("XKCD", kImagePath, images)) {
+  if (!Storage.openFileForRead("XKCD", kImagePath(), images)) {
     snprintf(whyNot, whyNotCap, "The pack is missing images.dat.");
     return false;
   }
@@ -1069,7 +1090,7 @@ bool XkcdActivity::fetchOne(const uint16_t num, char* whyNot, const int whyNotCa
   // Appended rather than rewritten: new comics always carry the highest
   // numbers, so appending to index.dat keeps it sorted, which is the one
   // property the binary search depends on.
-  if (!Storage.openFileForAppend("XKCD", kImagePath, images)) {
+  if (!Storage.openFileForAppend("XKCD", kImagePath(), images)) {
     snprintf(whyNot, whyNotCap, "Could not append to images.dat.");
     return false;
   }
@@ -1094,11 +1115,11 @@ bool XkcdActivity::fetchOne(const uint16_t num, char* whyNot, const int whyNotCa
   images.close();
 
   uint32_t textOffset = 0;
-  if (Storage.openFileForRead("XKCD", kTextPath, texts)) {
+  if (Storage.openFileForRead("XKCD", kTextPath(), texts)) {
     textOffset = static_cast<uint32_t>(texts.size());
     texts.close();
   }
-  if (!Storage.openFileForAppend("XKCD", kTextPath, texts)) {
+  if (!Storage.openFileForAppend("XKCD", kTextPath(), texts)) {
     snprintf(whyNot, whyNotCap, "Could not append to text.dat.");
     return false;
   }
@@ -1116,15 +1137,15 @@ bool XkcdActivity::fetchOne(const uint16_t num, char* whyNot, const int whyNotCa
 
   uint8_t rec[xkcd::kIndexRecordBytes];
   xkcd::encodeRecord(c, rec);
-  if (!Storage.openFileForAppend("XKCD", kIndexPath, index)) {
+  if (!Storage.openFileForAppend("XKCD", kIndexPath(), index)) {
     snprintf(whyNot, whyNotCap, "Could not append to index.dat.");
     return false;
   }
   index.write(rec, sizeof(rec));
   index.close();
 
-  Storage.remove(kTmpPng);
-  Storage.remove(kTmpBmp);
+  Storage.remove(kTmpPng());
+  Storage.remove(kTmpBmp());
   return true;
 }
 
@@ -1254,7 +1275,7 @@ void XkcdActivity::runUpdate() {
     // below is ignored and the header lands at EOF. openFileForUpdate is plain
     // O_RDWR, which is what patching in place actually needs.
     HalFile patch;
-    if (Storage.openFileForUpdate("XKCD", kIndexPath, patch)) {
+    if (Storage.openFileForUpdate("XKCD", kIndexPath(), patch)) {
       const uint32_t total = static_cast<uint32_t>(archive_.count() + fetched_);
       uint8_t head[8];
       head[0] = static_cast<uint8_t>(total & 0xFF);

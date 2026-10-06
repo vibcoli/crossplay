@@ -6,12 +6,16 @@
 
 #include <algorithm>
 
+#include "../../util/AppDataRoot.h"
 #include "NotesCore.h"
 
 namespace notes {
 namespace {
 
-constexpr const char* kDir = "/notes";
+// Resolved through appdata so a user can keep their notes out of the
+// book list by renaming the folder "/.notes" -- .md counts as a book to
+// LibraryBuilder. See util/AppDataRoot.h.
+const char* kDir() { return appdata::root("/notes"); }
 constexpr const char* kExt = ".md";
 constexpr const char* kPartExt = ".part";
 constexpr size_t kNameMax = 64;
@@ -83,15 +87,15 @@ bool Library::exists(const std::vector<Entry>& entries, const std::string& name)
   return false;
 }
 
-std::string Library::pathFor(const std::string& name) const { return std::string(kDir) + "/" + name + kExt; }
+std::string Library::pathFor(const std::string& name) const { return std::string(kDir()) + "/" + name + kExt; }
 
 std::string Library::partPathFor(const std::string& name) const {
-  return std::string(kDir) + "/" + name + kExt + kPartExt;
+  return std::string(kDir()) + "/" + name + kExt + kPartExt;
 }
 
 bool Library::begin() {
-  if (!Storage.ensureDirectoryExists(kDir)) {
-    LOG_ERR("NOTES", "could not make %s", kDir);
+  if (!Storage.ensureDirectoryExists(kDir())) {
+    LOG_ERR("NOTES", "could not make %s", kDir());
     return false;
   }
   scan();
@@ -99,7 +103,7 @@ bool Library::begin() {
 }
 
 void Library::sweepPartFiles() const {
-  auto dir = Storage.open(kDir);
+  auto dir = Storage.open(kDir());
   if (!dir || !dir.isDirectory()) return;
   auto name = makeUniqueNoThrow<char[]>(kNameMax + 16);
   if (!name) return;
@@ -109,14 +113,14 @@ void Library::sweepPartFiles() const {
     entry.getName(name.get(), kNameMax + 16);
     if (endsWith(name.get(), kPartExt)) doomed.emplace_back(name.get());
   }
-  for (const std::string& part : doomed) Storage.remove((std::string(kDir) + "/" + part).c_str());
+  for (const std::string& part : doomed) Storage.remove((std::string(kDir()) + "/" + part).c_str());
 }
 
 void Library::scan() {
   entries_.clear();
   sweepPartFiles();
 
-  auto dir = Storage.open(kDir);
+  auto dir = Storage.open(kDir());
   if (!dir || !dir.isDirectory()) return;
   auto name = makeUniqueNoThrow<char[]>(kNameMax + 16);
   if (!name) {

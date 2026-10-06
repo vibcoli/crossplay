@@ -15,6 +15,7 @@
 #include "../../activities/network/WifiSelectionActivity.h"
 #include "../../components/UITheme.h"
 #include "../../network/HttpDownloader.h"
+#include "../../util/AppDataRoot.h"
 #include "../Shelf.h"
 #include "../bridge/BridgeHttp.h"
 #include "../ui/ToyboxFonts.h"
@@ -24,22 +25,39 @@ namespace fui = freeink::ui;
 
 namespace {
 
-constexpr const char* kDir = "/trivia";
-constexpr const char* kPackPath = "/trivia/pack.dat";
-constexpr const char* kPartPath = "/trivia/pack.dat.part";
+// Resolved through appdata so a user can keep this folder out of the
+// book list by renaming it with a leading dot; see util/AppDataRoot.h.
+const char* kDir() { return appdata::root("/trivia"); }
+const char* kPackPath() {
+  static const std::string path = appdata::path("/trivia", "pack.dat");
+  return path.c_str();
+}
+const char* kPartPath() {
+  static const std::string path = appdata::path("/trivia", "pack.dat.part");
+  return path.c_str();
+}
 // A rolling PRERELEASE, so the OTA's releases/latest can never see it and a
 // 6MB question pack never lands in a firmware update. Same arrangement as the
 // xkcd archive; see docs/apps/trivia-pack-format.md.
 constexpr const char* kPackUrl = "https://github.com/ma-r-s/crossplay/releases/download/trivia-pack/pack.dat";
-constexpr const char* kStatePath = "/trivia/pack.state";
+const char* kStatePath() {
+  static const std::string path = appdata::path("/trivia", "pack.state");
+  return path.c_str();
+}
 // Published in the SAME release upload as pack.dat, so the two cannot skew.
 // Fetched straight from GitHub rather than through a service: the device is not
 // a browser, so the CORS problem that put api/firmware.js on the site does not
 // apply to it, and a freshness check needing no service beats one that does.
 constexpr const char* kManifestUrl = "https://github.com/ma-r-s/crossplay/releases/download/trivia-pack/pack.json";
 // Which build this card holds, and the reports waiting to go up.
-constexpr const char* kMetaPath = "/trivia/pack.meta";
-constexpr const char* kReportsPath = "/trivia/reports.dat";
+const char* kMetaPath() {
+  static const std::string path = appdata::path("/trivia", "pack.meta");
+  return path.c_str();
+}
+const char* kReportsPath() {
+  static const std::string path = appdata::path("/trivia", "reports.dat");
+  return path.c_str();
+}
 
 // Reports ride a request the device was making anyway, which is card #125's
 // rule: the device never brings the radio up to report. The headers that
@@ -70,7 +88,10 @@ constexpr bridge::Endpoint kReportEndpoint = {
 // One byte: the difficulty filter. It lived only in the activity, which is
 // deleted on exit, so leaving Trivia and coming back silently put a player who
 // had chosen Level 4 back on "Any" with nothing on screen to say so.
-constexpr const char* kPrefsPath = "/trivia/prefs";
+const char* kPrefsPath() {
+  static const std::string path = appdata::path("/trivia", "prefs");
+  return path.c_str();
+}
 
 // A ByteSource over a HalFile. Every read seeks first: an index entry and the
 // record it points at are in different places, so sequential reads are the
@@ -177,7 +198,7 @@ std::unique_ptr<Activity> TriviaActivity::create(GfxRenderer& renderer, MappedIn
 }
 
 bool TriviaActivity::ensureState(const uint32_t count) {
-  g_stateFile = Storage.open(kStatePath, O_RDWR);
+  g_stateFile = Storage.open(kStatePath(), O_RDWR);
   if (!g_stateFile.isOpen() || static_cast<uint32_t>(g_stateFile.size()) != count) {
     // Missing, or a DIFFERENT length from the pack because the pack was
     // replaced under it. Rewriting loses which questions have been seen, which
@@ -192,22 +213,22 @@ bool TriviaActivity::ensureState(const uint32_t count) {
     // check the length; the guard is at the boundary as well as at the caller
     // because this is the only caller today and will not be the last.
     HalFile fresh;
-    if (!Storage.openFileForWrite("TRIVIA", kStatePath, fresh)) {
-      LOG_ERR("TRIVIA", "Cannot create %s", kStatePath);
+    if (!Storage.openFileForWrite("TRIVIA", kStatePath(), fresh)) {
+      LOG_ERR("TRIVIA", "Cannot create %s", kStatePath());
       return false;
     }
     uint8_t zeros[256] = {};
     for (uint32_t written = 0; written < count;) {
       const uint32_t chunk = (count - written) < sizeof(zeros) ? (count - written) : sizeof(zeros);
       if (fresh.write(zeros, chunk) != chunk) {
-        LOG_ERR("TRIVIA", "Short write creating %s", kStatePath);
+        LOG_ERR("TRIVIA", "Short write creating %s", kStatePath());
         return false;
       }
       written += chunk;
     }
     fresh.flush();
     fresh.close();
-    g_stateFile = Storage.open(kStatePath, O_RDWR);
+    g_stateFile = Storage.open(kStatePath(), O_RDWR);
   }
   if (!g_stateFile.isOpen()) return false;
   g_stateSource.attach(g_stateFile);
@@ -215,13 +236,13 @@ bool TriviaActivity::ensureState(const uint32_t count) {
 }
 
 bool TriviaActivity::openPack() {
-  if (!Storage.openFileForRead("TRIVIA", kPackPath, g_packFile)) {
-    LOG_ERR("TRIVIA", "No pack at %s", kPackPath);
+  if (!Storage.openFileForRead("TRIVIA", kPackPath(), g_packFile)) {
+    LOG_ERR("TRIVIA", "No pack at %s", kPackPath());
     return false;
   }
   g_packSource.attach(g_packFile);
   if (!pack_.open(g_packSource)) {
-    LOG_ERR("TRIVIA", "%s is not a readable trivia pack", kPackPath);
+    LOG_ERR("TRIVIA", "%s is not a readable trivia pack", kPackPath());
     return false;
   }
   if (!ensureState(pack_.count())) return false;
@@ -240,7 +261,7 @@ bool TriviaActivity::openPack() {
 // reported. HIDE still works throughout; only the outbound copy is withheld.
 void TriviaActivity::openReports(const uint32_t count, const uint32_t packBytes) {
   meta_ = trivia::PackMeta{};
-  HalFile metaFile = Storage.open(kMetaPath, O_RDONLY);
+  HalFile metaFile = Storage.open(kMetaPath(), O_RDONLY);
   if (metaFile.isOpen() && metaFile.size() > 0 && metaFile.size() < 512) {
     char text[512] = {};
     const int read = metaFile.read(text, static_cast<size_t>(metaFile.size()));
@@ -257,16 +278,16 @@ void TriviaActivity::openReports(const uint32_t count, const uint32_t packBytes)
     return;
   }
 
-  g_reportFile = Storage.open(kReportsPath, O_RDWR);
+  g_reportFile = Storage.open(kReportsPath(), O_RDWR);
   if (!g_reportFile.isOpen()) {
     HalFile fresh;
-    if (!Storage.openFileForWrite("TRIVIA", kReportsPath, fresh)) {
-      LOG_ERR("TRIVIA", "Cannot create %s", kReportsPath);
+    if (!Storage.openFileForWrite("TRIVIA", kReportsPath(), fresh)) {
+      LOG_ERR("TRIVIA", "Cannot create %s", kReportsPath());
       return;
     }
     fresh.flush();
     fresh.close();
-    g_reportFile = Storage.open(kReportsPath, O_RDWR);
+    g_reportFile = Storage.open(kReportsPath(), O_RDWR);
     if (!g_reportFile.isOpen()) return;
   }
   g_reportSource.attachGrowing(g_reportFile);
@@ -284,7 +305,7 @@ void TriviaActivity::openReports(const uint32_t count, const uint32_t packBytes)
               reports_.packId());
       break;
     case trivia::QueueOpen::Unusable:
-      LOG_ERR("TRIVIA", "%s is not a readable report queue", kReportsPath);
+      LOG_ERR("TRIVIA", "%s is not a readable report queue", kReportsPath());
       break;
   }
 }
@@ -366,7 +387,7 @@ void TriviaActivity::fileReport(const uint32_t index, const trivia::Reason reaso
 namespace {
 
 int loadDifficulty() {
-  HalFile f = Storage.open(kPrefsPath, O_RDONLY);
+  HalFile f = Storage.open(kPrefsPath(), O_RDONLY);
   if (!f.isOpen() || f.size() < 1) return 0;
   uint8_t b = 0;
   if (f.read(&b, 1) != 1) return 0;
@@ -377,7 +398,7 @@ int loadDifficulty() {
 
 void saveDifficulty(const int difficulty) {
   HalFile f;
-  if (!Storage.openFileForWrite("TRIVIA", kPrefsPath, f)) return;
+  if (!Storage.openFileForWrite("TRIVIA", kPrefsPath(), f)) return;
   const uint8_t b = static_cast<uint8_t>(difficulty);
   f.write(&b, 1);
 }
@@ -470,7 +491,7 @@ void TriviaActivity::runPackDownload() {
   // host directory where mkdir on an existing path succeeds. Every other
   // caller in this fork already does it this way -- StudyActivity, ScreenshotUtil,
   // BookmarkFile -- and this was the one that invented its own.
-  if (!Storage.exists(kDir) && !Storage.mkdir(kDir)) {
+  if (!Storage.exists(kDir()) && !Storage.mkdir(kDir())) {
     showNotice("NO ROOM", "Could not create /trivia on the card. Is the card in, and writable?", "TRY AGAIN",
                triviaui::ActionGetPack);
     return;
@@ -550,9 +571,9 @@ void TriviaActivity::runPackDownload() {
   noticeAction_ = nullptr;
   requestUpdateAndWait();
 
-  const auto err = HttpDownloader::downloadToFile(kPackUrl, kPartPath, progress, &downloadCancel_);
+  const auto err = HttpDownloader::downloadToFile(kPackUrl, kPartPath(), progress, &downloadCancel_);
   if (err != HttpDownloader::OK) {
-    Storage.remove(kPartPath);
+    Storage.remove(kPartPath());
     // Every one of these offers TRY AGAIN. A screen that reports a failure and
     // gives you nothing to press is a dead end -- the user's only way out is to
     // leave the app, and nothing on screen says so. Get Books shipped exactly
@@ -569,8 +590,8 @@ void TriviaActivity::runPackDownload() {
     return;
   }
 
-  Storage.remove(kPackPath);  // a half pack from an earlier era must not block the rename
-  if (!Storage.rename(kPartPath, kPackPath)) {
+  Storage.remove(kPackPath());  // a half pack from an earlier era must not block the rename
+  if (!Storage.rename(kPartPath(), kPackPath())) {
     showNotice("CARD TROUBLE", "Downloaded, but the card refused the final rename.", "TRY AGAIN",
                triviaui::ActionGetPack);
     return;
@@ -627,8 +648,8 @@ bool TriviaActivity::adoptManifest(const trivia::PackManifest& published) {
   const size_t n = trivia::formatMeta(text, sizeof(text), published.id, published.count, published.bytes);
   if (n == 0) return false;
   HalFile out;
-  if (!Storage.openFileForWrite("TRIVIA", kMetaPath, out)) {
-    LOG_ERR("TRIVIA", "Cannot write %s", kMetaPath);
+  if (!Storage.openFileForWrite("TRIVIA", kMetaPath(), out)) {
+    LOG_ERR("TRIVIA", "Cannot write %s", kMetaPath());
     return false;
   }
   const bool wrote = out.write(reinterpret_cast<const uint8_t*>(text), n) == n;
@@ -650,8 +671,8 @@ bool TriviaActivity::adoptManifest(const trivia::PackManifest& published) {
 void TriviaActivity::compactReports() {
   if (!reports_.isOpen() || reports_.pending() > 0) return;
   g_reportFile.close();
-  if (!Storage.remove(kReportsPath)) {
-    LOG_ERR("TRIVIA", "Could not drop the delivered queue at %s", kReportsPath);
+  if (!Storage.remove(kReportsPath())) {
+    LOG_ERR("TRIVIA", "Could not drop the delivered queue at %s", kReportsPath());
   }
   if (meta_.valid) openReports(pack_.count(), g_packSource.size());
 }
