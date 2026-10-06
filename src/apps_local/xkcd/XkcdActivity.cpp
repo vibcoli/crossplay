@@ -1016,7 +1016,13 @@ bool XkcdActivity::fetchOne(const uint16_t num, char* whyNot, const int whyNotCa
       updateHomeCancel_ = true;
     }
   };
-  if (HttpDownloader::downloadToFile(img, kTmpPng(), pump, &updateCancel_) != HttpDownloader::OK) {
+  // Hoisted rather than called inline: host-tests/paintfirst reads this
+  // argument list with a regex that stops at the first ')', and it is checking
+  // something worth keeping -- that the artwork download is handed a progress
+  // callback, since that is the only thing pumping input for the seconds it
+  // runs.
+  const char* tmpPng = kTmpPng();
+  if (HttpDownloader::downloadToFile(img, tmpPng, pump, &updateCancel_) != HttpDownloader::OK) {
     snprintf(whyNot, whyNotCap, "Could not download the artwork for #%u.", static_cast<unsigned>(num));
     return false;
   }
