@@ -149,6 +149,28 @@ jobs:
       # on no frames and fails a task whose entry is missing -- so the old
       # arrangement would have gone red rather than quiet. That is why this is
       # a fragility fix and not a bug fix.
+      # SCRATCH BRANCH ONLY -- do not merge. The nightly audit publishes
+      # nothing on purpose (ship.sh packages the real releases), but the
+      # registry is unreachable from the container this branch was built in,
+      # so this is the only way to get a flashable image out of a clean
+      # checkout of it. release.yml would be the proper route and cannot run
+      # here: its matrix still names upstream's envs (x4pro-gh_release), which
+      # this fork's platformio.ini does not define.
+      - name: Upload the firmware images
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: |
+            .pio/build/gh_release_x4pro/firmware.bin
+            .pio/build/gh_release_x4pro/bootloader.bin
+            .pio/build/gh_release_x4pro/partitions.bin
+            .pio/build/gh_release_sticky/firmware.bin
+            .pio/build/gh_release_sticky/bootloader.bin
+            .pio/build/gh_release_sticky/partitions.bin
+            .pio/build/gh_release_papermono/firmware.bin
+            .pio/build/gh_release_papermono/bootloader.bin
+            .pio/build/gh_release_papermono/partitions.bin
+
       - name: Stack fits its task (x4pro)
         run: python3 scripts_local/stack_budget.py --build-dir .pio/build/gh_release_x4pro
 
