@@ -39,6 +39,8 @@ StrId opdsFormatLabel(uint8_t format) {
       return StrId::STR_FMT_TITLE_AUTHOR;
     case static_cast<uint8_t>(OpdsFilenameFormat::TitleOnly):
       return StrId::STR_FMT_TITLE;
+    case static_cast<uint8_t>(OpdsFilenameFormat::ServerFilename):
+      return StrId::STR_FMT_SERVER;
     default:
       return StrId::STR_FMT_AUTHOR_TITLE;
   }
@@ -172,7 +174,7 @@ void OpdsServerListActivity::handleSelection() {
   // "Filename format": picker like every other multi-option setting.
   if (nav.selected == serverCount + 2) {
     static constexpr StrId formatLabels[] = {StrId::STR_FMT_AUTHOR_TITLE, StrId::STR_FMT_TITLE_AUTHOR,
-                                             StrId::STR_FMT_TITLE};
+                                             StrId::STR_FMT_TITLE, StrId::STR_FMT_SERVER};
     optionPopup.show(StrId::STR_OPDS_FILENAME_FORMAT, formatLabels, static_cast<int>(OpdsFilenameFormat::Count),
                      SETTINGS.opdsFilenameFormat, [this](int idx) {
                        SETTINGS.opdsFilenameFormat = static_cast<uint8_t>(idx);

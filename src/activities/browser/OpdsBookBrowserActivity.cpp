@@ -200,7 +200,13 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
 
   // Build full download URL relative to the current feed, not the root server URL
   const std::string feedUrl = UrlUtils::buildUrl(server.url, currentPath);
-  std::string downloadUrl = UrlUtils::buildUrl(feedUrl, book.href);
+  const std::string downloadUrl = UrlUtils::buildUrl(feedUrl, book.href);
+  const auto format = static_cast<OpdsFilenameFormat>(SETTINGS.opdsFilenameFormat);
+  // Copied out of the entry now: the name is composed after releaseEntries()
+  // below, which invalidates this reference. Two allocations on a path that is
+  // about to spend seconds on the network.
+  const std::string author = book.author;
+  const std::string title = book.title;
   // opdsDownloadFolder is already a null-terminated char[64]; use it directly —
   // no std::string copy. exists()/mkdir() take const char*.
   const char* folder = SETTINGS.opdsDownloadFolder;  // "" => SD root
@@ -213,6 +219,22 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
     haveFolder = false;
   }
 
+  // The selected book data is now copied into the download URL, the author and
+  // title above, and the status line. Reclaim the catalog before the name probe
+  // and the transfer each ask TLS for record buffers; reload the current feed
+  // when the transfer finishes.
+  releaseEntries();
+
+  // "Server filename" costs one HEAD request, and a server that names nothing
+  // usable falls back to the metadata name rather than failing the download.
+  std::string base;
+  if (format == OpdsFilenameFormat::ServerFilename) {
+    const auto probed = HttpDownloader::probeServerName(downloadUrl, server.username, server.password);
+    base = opdsServerFilename(probed.contentDisposition, probed.location, downloadUrl);
+    if (base.empty()) LOG_INF("OPDS", "server named no file; using metadata name");
+  }
+  if (base.empty()) base = opdsBookFilename(author, title, format);
+
   // downloadToFile() needs a std::string, and titles are unbounded (a fixed
   // char[] would truncate). Cold path (a multi-second download follows), so one
   // reserve'd, in-place-appended owning string is the right call.
@@ -220,13 +242,8 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   filename.reserve(96);
   if (haveFolder) filename += folder;
   filename += '/';
-  filename += opdsBookFilename(book.author, book.title, static_cast<OpdsFilenameFormat>(SETTINGS.opdsFilenameFormat));
+  filename += base;
   LOG_DBG("OPDS", "Downloading: %s -> %s", downloadUrl.c_str(), filename.c_str());
-
-  // The selected book data is now copied into the download URL, filename, and
-  // status line. Reclaim the catalog while TLS owns its record buffers; reload
-  // the current feed when the transfer finishes.
-  releaseEntries();
 
   // downloadFile() (CatalogActivity) releases font caches and checks the TLS heap floor.
   const auto result = downloadFile(downloadUrl, filename, server.username, server.password);

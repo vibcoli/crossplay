@@ -57,6 +57,23 @@ class HttpDownloader {
 
   using Header = std::pair<std::string, std::string>;
 
+  // The response headers that name a downloadable file. Both are "" when the
+  // server offers neither (or the probe never got a response).
+  struct ServerName {
+    std::string contentDisposition;
+    std::string location;
+  };
+
+  /**
+   * Asks `url` what it calls the file, without downloading it: a HEAD request
+   * whose redirects are deliberately NOT followed, so a 302's Location is
+   * still visible. Feed it to opdsServerFilename(). Cheap enough to run
+   * immediately before a download, and failure is not fatal -- an empty result
+   * just means the caller composes a name from metadata instead.
+   */
+  static ServerName probeServerName(const std::string& url, const std::string& username = "",
+                                    const std::string& password = "");
+
   /**
    * Download a file to the SD card with optional credentials. `headers` are
    * added to the request (e.g. a Bearer Authorization), alongside any Basic

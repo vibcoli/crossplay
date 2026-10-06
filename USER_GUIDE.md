@@ -396,6 +396,22 @@ CrossPlay supports saving multiple OPDS servers and switching between them when 
 
 4. Use **Delete Server** inside a server entry to remove it.
 
+The server list itself also carries two settings that apply to every catalog:
+
+- **Download Folder**: where downloaded books land (empty means the SD card root).
+
+- **Filename Format**: how downloaded books are named on the SD card.
+  - **Author - Title** (default), **Title - Author**, **Title**: composed from the catalog's metadata.
+  - **Server filename**: whatever the server calls the file, taken from its
+    `Content-Disposition` header, a redirect target, or the download URL, in that
+    order. Pick this if you also read on KOReader and sync progress with
+    **Document Matching** set to **Filename** (see
+    [KOReader Sync Quick Setup](#367-koreader-sync-quick-setup)): that method
+    identifies a book by the hash of its filename, so it only recognises a book
+    both devices stored under the same name. KOReader's matching OPDS option is
+    called "Use server filenames". When a server offers no usable name, CrossPlay
+    falls back to **Author - Title** for that download.
+
 Behavior notes:
 
 - You can store up to 8 OPDS servers.

@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <Logging.h>
 #include <ResumableFetch.h>
+#include <SecureHttpClient.h>
 #include <WiFi.h>
 
 #include <functional>
@@ -21,6 +22,16 @@ constexpr int HTTP_TIMEOUT_MS = 60000;
 
 // Written after every request, and read by the UI right after a failure.
 int g_lastStatus = 0;
+
+// Timeout for the filename probe. A HEAD response carries headers only, but a
+// server may still advertise the body's Content-Length and then send nothing;
+// SecureHttpClient frames the body from those headers, so it would wait for
+// bytes that are not coming. Asking for `Connection: close` (setReuse(false))
+// makes the server hang up as soon as the headers are out, which ends that wait
+// at once -- this shorter timeout only bounds a server that ignores it. Either
+// way the headers are already parsed and readable; only a body that does not
+// exist gets cut short.
+constexpr int PROBE_TIMEOUT_MS = 10000;
 
 // How often the abort poll is allowed to pump input. SecureHttpClient calls the
 // abort callback in a tight loop, so pumping on every call would spend the wait
@@ -133,6 +144,38 @@ HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::st
 }  // namespace
 
 int HttpDownloader::lastStatus() { return g_lastStatus; }
+
+HttpDownloader::ServerName HttpDownloader::probeServerName(const std::string& url, const std::string& username,
+                                                           const std::string& password) {
+  ServerName name;
+  // Same hard guard as runGetSecure(): entering the TLS stack with the radio
+  // down panics rather than failing.
+  if (WiFi.status() != WL_CONNECTED) {
+    LOG_ERR("HTTP", "no WiFi connection; refusing to probe %s", url.c_str());
+    return name;
+  }
+  WifiPowerSaveGuard psGuard;
+  freeink::SecureHttpClient http;
+  if (!http.begin(url)) {
+    LOG_ERR("HTTP", "filename probe: malformed URL %s", url.c_str());
+    return name;
+  }
+  http.setTimeout(PROBE_TIMEOUT_MS);
+  http.setInsecure();
+  http.setUserAgent("CrossPlay-ESP32-" CROSSPOINT_VERSION);
+  http.setReuse(false);  // see PROBE_TIMEOUT_MS
+  if (!username.empty() && !password.empty()) http.setBasicAuth(username, password);
+  // No device-report headers: those count a delivery, and this request
+  // deliberately delivers nothing.
+  const int status = http.sendRequest("HEAD", nullptr, 0);
+  // Readable whatever became of the (absent) body; only a status line that
+  // never arrived leaves them empty.
+  name.contentDisposition = http.getHeader("content-disposition");
+  name.location = http.getHeader("location");
+  LOG_DBG("HTTP", "filename probe %s: status %d, disposition '%s', location '%s'", url.c_str(), status,
+          name.contentDisposition.c_str(), name.location.c_str());
+  return name;
+}
 
 bool HttpDownloader::fetchUrl(const std::string& url, std::string& outContent, const std::string& username,
                               const std::string& password) {
