@@ -1305,8 +1305,15 @@ def write_glyphs(notes, out_dir):
         # same as "this deck was converted by an older tool".
         ("ruby", ruby),
     ):
-        path = out_dir / f"glyphs-{name}.txt"
+        path = scripts.glyph_write_path(out_dir, name)
         path.write_text("".join(sorted(chars)), encoding="utf-8")
+        # Re-converting a deck that predates the dotted spelling leaves the old
+        # file behind, and it would go on showing up in the shelf next to the
+        # new one. Removing it here is the whole migration: convert again and
+        # the deck is clean.
+        legacy = scripts.glyph_legacy_path(out_dir, name)
+        if legacy.is_file():
+            legacy.unlink()
         sizes[name] = len(chars)
     return sizes
 

@@ -30,6 +30,9 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
+
+sys.path.insert(0, str(HERE))
+import scripts  # noqa: E402  (needs the path line above)
 CONFIG = (
     pathlib.Path(os.environ.get("XDG_CONFIG_HOME", pathlib.Path.home() / ".config"))
     / "crosspoint-study.json"
@@ -225,8 +228,8 @@ def deck_has_cjk(deck_dir):
     deck name or a language guess.
     """
     text = ""
-    for stem in ("glyphs-headword", "glyphs-sentence"):
-        f = deck_dir / f"{stem}.txt"
+    for name in ("headword", "sentence"):
+        f = scripts.glyph_read_path(deck_dir, name)
         if f.is_file():
             text += f.read_text(encoding="utf-8")
     return any(a <= ord(c) <= b for c in text for a, b in [r for r in CJK_RANGES])

@@ -292,3 +292,45 @@ def visible_text(encoded):
 def reading_text(encoded):
     """Just the readings, for the glyph set the ruby-size face is built from."""
     return "".join(reading for _base, reading in decode_ruby(encoded))
+
+
+# --- the deck's glyph sets -------------------------------------------------
+#
+# DOTTED, because .txt is a book extension to the reader's shelf.
+# LibraryBuilder indexes .epub, .txt, .md and .xtc, and a deck directory sits
+# under /study on the card, so four undotted glyph files per deck turned up in
+# the user's book list beside their books. isHiddenOrSidecar skips any name
+# starting with '.', so the dotted spelling is invisible to the shelf while
+# staying exactly where the font pipeline expects it.
+#
+# The device never reads these at all -- it opens meta.dat, deck.dat,
+# cards.dat, revlog.dat, images.dat, .resume and .last, and nothing else.
+# They are build inputs for make_fonts.py, and study.py reads two of them to
+# decide whether a deck needs the CJK pipeline.
+GLYPH_SETS = ("headword", "sentence", "latin", "ruby")
+
+
+def glyph_write_path(deck_dir, name):
+    """Where a conversion WRITES this deck's `name` glyph set: always dotted."""
+    return deck_dir / f".glyphs-{name}.txt"
+
+
+def glyph_legacy_path(deck_dir, name):
+    """The undotted spelling written before this change."""
+    return deck_dir / f"glyphs-{name}.txt"
+
+
+def glyph_read_path(deck_dir, name):
+    """Where to READ this deck's `name` glyph set.
+
+    Prefers the dotted spelling and falls back to the undotted one, so a deck
+    converted before this keeps building its fonts without being re-converted.
+    Returns the dotted path when neither exists, which keeps the caller's
+    is_file() answer meaningful: for `ruby`, absent and empty both mean "this
+    deck has no furigana", and that distinction is load-bearing in make_fonts.
+    """
+    dotted = glyph_write_path(deck_dir, name)
+    if dotted.is_file():
+        return dotted
+    legacy = glyph_legacy_path(deck_dir, name)
+    return legacy if legacy.is_file() else dotted

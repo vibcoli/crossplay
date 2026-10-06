@@ -13,10 +13,15 @@ total. This is not a close call.
         cards.dat       scheduling state, rewritten by the device
         revlog.dat      append-only review history, read back by the sync script
         meta.dat        FSRS parameters, learning steps, limits, identity
-        glyphs-*.txt    the codepoints the deck uses, split by the size they
+        .glyphs-*.txt   the codepoints the deck uses, split by the size they
                         are rendered at, for the font pipeline: headword,
                         sentence, latin, and ruby (the furigana readings,
-                        empty for a deck that has none)
+                        empty for a deck that has none). Dotted because .txt
+                        is a book extension: the shelf indexes .txt and skips
+                        any name starting with a dot, so an undotted set put
+                        four entries per deck in the user's book list. The
+                        device never reads these; the undotted spelling is
+                        still accepted so an older deck needs no re-convert.
 
 ## The one design rule
 
