@@ -58,7 +58,9 @@ project is (`identity.md`), the shelf contract (`shelf.md`), the two real
 buttons (`buttons.md`), what scale does to games (`games-at-scale.md`), how to
 reflash and inspect a device over Wi-Fi with no cable
 (`developer-mode.md`), how the two open bridges are attacked and defended
-(`bridge-security.md`), and what is knowingly unfinished (`open-items.md`).
+(`bridge-security.md`), what is knowingly unfinished (`open-items.md`), and one
+standing proposal about where the fork's files live on the card
+(`crossplay-data-root.md`), which is a question rather than a decision.
 
 Four more are narrower but no less load-bearing, and this paragraph did not
 name any of them until the suite started asking: what the glass hides
