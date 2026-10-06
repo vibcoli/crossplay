@@ -11,6 +11,7 @@
 
 #include "DeviceReport.h"
 #include "WifiPowerSaveGuard.h"
+#include "util/StringUtils.h"
 
 extern "C" void wolfSSL_Arduino_Serial_Print(const char* const msg) { LOG_DBG("WOLFSSL", "%s", msg); }
 
@@ -31,7 +32,10 @@ int g_lastStatus = 0;
 // at once -- this shorter timeout only bounds a server that ignores it. Either
 // way the headers are already parsed and readable; only a body that does not
 // exist gets cut short.
-constexpr int PROBE_TIMEOUT_MS = 10000;
+//
+// uint16_t, not int: the simulator's SecureHttpClient takes setTimeout(uint16_t)
+// where the SDK's takes uint32_t, so the type is part of the shared surface.
+constexpr uint16_t PROBE_TIMEOUT_MS = 10000;
 
 // How often the abort poll is allowed to pump input. SecureHttpClient calls the
 // abort callback in a tight loop, so pumping on every call would spend the wait
@@ -167,11 +171,28 @@ HttpDownloader::ServerName HttpDownloader::probeServerName(const std::string& ur
   if (!username.empty() && !password.empty()) http.setBasicAuth(username, password);
   // No device-report headers: those count a delivery, and this request
   // deliberately delivers nothing.
-  const int status = http.sendRequest("HEAD", nullptr, 0);
-  // Readable whatever became of the (absent) body; only a status line that
-  // never arrived leaves them empty.
-  name.contentDisposition = http.getHeader("content-disposition");
-  name.location = http.getHeader("location");
+  //
+  // THE FIVE-ARGUMENT FORM, and the sink only exists to reach it. The
+  // simulator links upstream's own SecureHttpClient -- crosspoint-simulator
+  // ships a header that shadows the SDK's -- and that one declares no default
+  // for shouldAbort and no 3-argument overload at all. A HEAD response has no
+  // body, so there is nothing for the sink to keep.
+  const int status = http.sendRequest("HEAD", nullptr, 0, [](const uint8_t*, size_t) { return true; }, nullptr);
+  // getHeaders() rather than getHeader(name), for the same reason: the
+  // simulator's client has only the former. src/util/PluginHttp.cpp reads
+  // response headers this way too. Compared case-insensitively because the
+  // SDK lowercases what it stores and the simulator promises nothing.
+  //
+  // The simulator's getHeaders() is a stub that returns nothing, so there the
+  // probe finds no name and opdsServerFilename() falls back to the URL --
+  // which is exactly what happens against a server that offers no name.
+  for (const auto& header : http.getHeaders()) {
+    if (StringUtils::asciiCaseCmp(header.first.c_str(), "content-disposition") == 0) {
+      name.contentDisposition = header.second;
+    } else if (StringUtils::asciiCaseCmp(header.first.c_str(), "location") == 0) {
+      name.location = header.second;
+    }
+  }
   LOG_DBG("HTTP", "filename probe %s: status %d, disposition '%s', location '%s'", url.c_str(), status,
           name.contentDisposition.c_str(), name.location.c_str());
   return name;
